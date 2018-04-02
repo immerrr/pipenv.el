@@ -89,9 +89,24 @@
   :type 'function
   :group 'pipenv)
 
+(defcustom pipenv-workon-home
+  nil
+  "Path to directory containing pipenv virtualenvs."
+  :type 'string
+  :group 'pipenv)
+
 ;;
 ;; Helper functions internal to the package.
 ;;
+
+(defmacro pipenv--with-workon-home (&rest body)
+  "Run BODY with WORKON_HOME overridden if necessary."
+  `(let ((process-environment process-environment))
+     (when pipenv-workon-home
+      (setq process-environment
+            (cons (concat "WORKON_HOME=" pipenv-workon-home)
+                  process-environment)))
+     ,@body))
 
 (defun pipenv--initialize ()
   "Initialization steps to run when the pipenv package is required."
@@ -167,13 +182,14 @@
 
 (defun pipenv--make-pipenv-process (command &optional filter sentinel)
   "Make a Pipenv process from COMMAND; optional custom FILTER or SENTINEL."
-  (make-process
-   :name pipenv-process-name
-   :buffer pipenv-process-buffer-name
-   :command command
-   :coding 'utf-8-unix
-   :filter filter
-   :sentinel sentinel))
+  (pipenv--with-workon-home
+   (make-process
+    :name pipenv-process-name
+    :buffer pipenv-process-buffer-name
+    :command command
+    :coding 'utf-8-unix
+    :filter filter
+    :sentinel sentinel)))
 
 (defun pipenv--command (args)
   "Call Pipenv with ARGS and the default filter stack."
@@ -297,12 +313,16 @@ or (if none is given), installs all packages."
 (defun pipenv-shell ()
   "Spawn a shell within the virtualenv."
   (interactive)
-  (let ((name (generate-new-buffer-name pipenv-shell-buffer-name)))
+  (let ((name (generate-new-buffer-name pipenv-shell-buffer-name))
+        proc)
     (pop-to-buffer name)
     (shell (current-buffer))
-    (insert pipenv-shell-buffer-init-command)
-    (comint-send-input)
-    (comint-clear-buffer)))
+    (setq proc (get-buffer-process (current-buffer)))
+    (when pipenv-workon-home
+      (comint-send-string
+       proc (concat "export WORKON_HOME=\"" pipenv-workon-home "\"\n")))
+    (comint-send-string proc (concat pipenv-shell-buffer-init-command "\n"))))
+
 
 (defun pipenv-uninstall (packages)
   "Uninstalls PACKAGES and removes from Pipfile."
